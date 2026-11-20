@@ -91,8 +91,12 @@ def run(project_dir: str):
     bgm_path = os.path.join(adir, "bgm.mp3")
     if not os.path.exists(bgm_path):
         music_prompt = doc.get("music", "cinematic majestic traditional Chinese guzheng erhu, warm")
+        extra = {}
+        if getattr(prov, "music_needs_duration", False):   # e.g. Higgsfield: length up front
+            extra["duration"] = 3 + sum(float(s.get("dur", 10)) for b in doc["beats"]
+                                        for s in (b.get("shots") or [b]))
         specs["bgm"] = (lambda mp=music_prompt: prov.submit_audio(
-            MUSIC_MODEL, prompt=mp, is_instrumental=True, format="mp3"))
+            MUSIC_MODEL, prompt=mp, is_instrumental=True, format="mp3", **extra))
     else:
         print(f"[bgm] reuse existing {bgm_path}")
 

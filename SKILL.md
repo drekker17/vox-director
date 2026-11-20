@@ -44,8 +44,14 @@ between "a real Vox collage" and "a moving PowerPoint".
 
 ## Prerequisites (check, don't skip)
 
-- `echo "${ATLASCLOUD_API_KEY:+set}"` — if empty, tell the user to set it (get one at
-  https://www.atlascloud.ai/console/api-keys) and stop.
+- **Backend.** On this machine, default to **Higgsfield**: set `"provider": "higgsfield"` in
+  every new beats.json and check `higgsfield account status` (if it says not authenticated,
+  ask the user to run `higgsfield auth login` and stop). Also set `"watermark"` (e.g. `""`)
+  so the film isn't stamped "Made with Atlas Cloud", and pick `voice.voice_id` from
+  `higgsfield voices list` (an xAI voice id falls back to the default narrator, Arthur).
+  Only if the user asks for Atlas Cloud: `echo "${ATLASCLOUD_API_KEY:+set}"` — if empty,
+  tell the user to set it (get one at https://www.atlascloud.ai/console/api-keys) and stop.
+  A-roll ASR (`asr_beats.py`) still needs Atlas Cloud; that's the one stage not on Higgsfield.
 - `command -v ffmpeg ffprobe` — required for assembly (`brew install ffmpeg` on macOS).
 - `python3 -c "import PIL"` — Pillow, for captions/watermark overlays.
 
@@ -306,9 +312,17 @@ API / ffmpeg gotcha (auth header, curl downloads, no-libass captions, content bl
 Read it before debugging any failure — most failures are already documented there.
 
 **Backends are pluggable.** Every API call goes through a **provider** (`scripts/provider.py`);
-Atlas Cloud is the default and only backend today. Set `"provider"` in beats.json to route to a
-different backend once one is added — the stage scripts don't change. `scripts/provider.py`'s
-`run_jobs()` also does the submit/poll with **auto-resubmit on a stalled or failed job**.
+Atlas Cloud is the default; **Higgsfield** (`"provider": "higgsfield"`,
+`scripts/higgsfield_provider.py`, drives the `higgsfield` CLI) is the second backend. Keep the
+Atlas model ids above in beats.json — the Higgsfield provider maps each one to its Higgsfield
+job type (nano-banana-2 → `nano_banana_flash`, gemini-omni-flash → `gemini_omni`,
+seedance-2.0 → `seedance_2_0`, kling o3 i2v → `kling3_0`, xai/tts → `text2speech_v2`,
+seed-audio → `seed_audio`, minimax music → `elevenlabs_music_v2_5`, remove-background →
+`image_background_remover`); a bare Higgsfield job type is passed through. `run_jobs()` does the
+submit/poll with **auto-resubmit on a failed job** — and on a stalled one for Atlas only
+(Higgsfield queues 1-2 min routinely; resubmitting would bill twice). Rough Higgsfield cost:
+1.5 credits per keyframe, ~30 per 8-10 s Gemini clip, ~45 per Seedance clip, <1 per narration
+line, ~9 per minute of music.
 
 ## Advanced: element-level motion collage
 

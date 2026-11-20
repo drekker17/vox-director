@@ -2,7 +2,7 @@
 """
 Provider abstraction — the pluggable media backend the pipeline stages talk to.
 
-Atlas Cloud is the default and, for now, the only backend. Stages call a Provider
+Atlas Cloud is the default; Higgsfield (higgsfield_provider.py) is the second backend. Stages call a Provider
 (submit_image/video/audio, remove_bg, get_status, upload, download) instead of a
 concrete client, so adding a backend is: subclass Provider + one registry entry.
 Pick a backend per project with beats.json `{"provider": "atlas_cloud"}` (default).
@@ -79,7 +79,12 @@ class AtlasCloudProvider(Provider):
         return atlas_cloud.download(url, dest)
 
 
-_REGISTRY = {"atlas_cloud": AtlasCloudProvider}
+def _higgsfield():
+    from higgsfield_provider import HiggsfieldProvider   # lazy: it imports Provider from here
+    return HiggsfieldProvider
+
+
+_REGISTRY = {"atlas_cloud": lambda: AtlasCloudProvider, "higgsfield": _higgsfield}
 
 
 def get_provider(name=None):
@@ -87,7 +92,7 @@ def get_provider(name=None):
     name = (name or "atlas_cloud").lower()
     if name not in _REGISTRY:
         raise ProviderError(f"unknown provider '{name}'; available: {list(_REGISTRY)}")
-    return _REGISTRY[name]()
+    return _REGISTRY[name]()()
 
 
 def run_jobs(prov, specs, *, poll_s=3, stall_s=90, max_retries=2, deadline_s=900):
@@ -97,7 +102,13 @@ def run_jobs(prov, specs, *, poll_s=3, stall_s=90, max_retries=2, deadline_s=900
     or stays pending past `stall_s`, is resubmitted (fresh id) up to `max_retries`
     times — this is what stops one stuck prediction from wasting the whole deadline.
     Returns key -> output URL (or None). Prints progress like the old loops did.
+
+    A provider can opt out of stall-resubmits (`resubmit_stalled = False`, for
+    queues where slow != stuck and a resubmit would bill twice) and stretch the
+    deadline (`deadline_factor`).
     """
+    resubmit_stalled = getattr(prov, "resubmit_stalled", True)
+    deadline_s *= getattr(prov, "deadline_factor", 1)
     st = {}
     for key, submit in specs.items():
         st[key] = {"pid": submit(), "t": time.time(), "tries": 0}
@@ -117,7 +128,8 @@ def run_jobs(prov, specs, *, poll_s=3, stall_s=90, max_retries=2, deadline_s=900
             if status == "completed":
                 done[key] = r["output"]
                 print(f"[{key}] done")
-            elif status == "failed" or (status == "pending" and now - s["t"] > stall_s):
+            elif status == "failed" or (resubmit_stalled and status == "pending"
+                                        and now - s["t"] > stall_s):
                 if s["tries"] < max_retries:
                     s["tries"] += 1
                     s["pid"] = submit()
